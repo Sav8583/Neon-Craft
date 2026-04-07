@@ -269,6 +269,9 @@
             deviceType = type;
             document.getElementById('menu').style.display = 'none'; document.getElementById('crosshair').style.display = 'block';
             document.getElementById('hud').style.display = 'block'; document.getElementById('fullscreen-btn').style.display = 'block';
+
+document.getElementById('quit-btn').style.display = 'block';
+
             currentScore = 0; document.getElementById('score-board').innerText = "SCORE: 0";
             
             toggleFullScreen(); initEngine(); createGuns(); generateInfiniteFloor();
