@@ -221,14 +221,21 @@
         }
 
         function addScore(points) {
-            currentScore += points; document.getElementById('score-board').innerText = "SCORE: " + currentScore;
-            if(currentScore > highScore) {
-                highScore = currentScore; document.getElementById('highscore-board').innerText = "HIGH: " + highScore;
-                if(currentUser !== "Guest") {
-                    db.collection("users").doc(currentUser).update({ score: highScore }).catch(e => console.log("Save error", e));
-                }
-            }
+    currentScore += points; 
+    document.getElementById('score-board').innerText = "SCORE: " + currentScore;
+    
+    if(currentScore > highScore) {
+        highScore = currentScore; 
+        document.getElementById('highscore-board').innerText = "HIGH: " + highScore;
+        
+        if(currentUser !== "Guest") {
+            // This new line FORCES Firebase to save it, even if the user file is missing!
+            db.collection("users").doc(currentUser).set({ score: highScore }, { merge: true })
+            .catch(e => console.log("Save error", e));
         }
+    }
+}
+
 
         function toggleFullScreen() { try { document.documentElement.requestFullscreen().catch(()=>{}); } catch(e) {} }
 
