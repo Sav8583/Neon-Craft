@@ -277,7 +277,7 @@
 
         function setupMultiplayer() {
             // ⚠️ REPLACE THIS WITH YOUR RAILWAY URL ⚠️
-            socket = io("https://YOUR_RAILWAY_URL_HERE.up.railway.app");
+            socket = io("https://neon-craft-production.up.railway.app");
 
             socket.on('currentPlayers', (players) => {
                 Object.keys(players).forEach(id => { if (id !== socket.id) addOtherPlayer(id, players[id]); });
