@@ -1,3 +1,19 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(express.static(__dirname));
+
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+
+const players = {};
+const mobs = {};
+let mobIdCounter = 0;
+
 // THE MASTER REFEREE: Controls all monsters
 setInterval(() => {
     const pKeys = Object.keys(players);
@@ -40,3 +56,33 @@ setInterval(() => {
         io.emit('mobsUpdate', mobs); // Broadcast new positions
     }
 }, 50); // Server ticks 20 times per second
+
+io.on('connection', (socket) => {
+    // Give new players the current lobby AND current monsters
+    players[socket.id] = { x: 0, y: 2, z: 0, ry: 0 };
+    socket.emit('currentPlayers', players);
+    socket.emit('currentMobs', mobs);
+    socket.broadcast.emit('newPlayer', { id: socket.id, position: players[socket.id] });
+
+    // Track player movements AND rotations
+    socket.on('playerMovement', (data) => {
+        players[socket.id] = data;
+        socket.broadcast.emit('playerMoved', { id: socket.id, position: data });
+    });
+
+    // When someone shoots a monster, delete it and tell everyone!
+    socket.on('mobKilled', (mobId) => {
+        if (mobs[mobId]) {
+            delete mobs[mobId];
+            io.emit('mobDied', mobId);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        delete players[socket.id];
+        io.emit('playerDisconnected', socket.id);
+    });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
