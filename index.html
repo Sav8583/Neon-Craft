@@ -295,10 +295,49 @@
         }
 
         function addOtherPlayer(id, pos) {
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.0, 0.8), matOtherPlayer);
-            mesh.position.set(pos.x, pos.y, pos.z);
-            scene.add(mesh); otherPlayers[id] = mesh;
-        }
+    const playerGroup = new THREE.Group(); // The main wrapper
+    const bodyGroup = new THREE.Group();   // The actual body parts
+    bodyGroup.position.y = -2; // Lowers the body so the head matches the camera height
+
+    // Player Colors (Cyan wireframe, dark core)
+    const matWire = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }); 
+    const matSolid = new THREE.MeshBasicMaterial({ color: 0x001111 });
+    const matEye = new THREE.MeshBasicMaterial({ color: 0xffffff }); // White eyes for players
+
+    const buildPart = (w, h, d, yPos) => { 
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); 
+        const wire = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); 
+        mesh.add(wire); mesh.position.y = yPos; return mesh; 
+    };
+
+    // Build the parts
+    const head = buildPart(0.6, 0.6, 0.6, 3.2); 
+    const body = buildPart(0.6, 2.0, 0.4, 1.9); 
+    const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, 0.31);
+    const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, 0.31);
+    head.add(eyeL); head.add(eyeR);
+
+    // Arms & Legs
+    const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75));
+    const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75));
+    const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9));
+    const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9));
+
+    // Attach everything together
+    bodyGroup.add(head); bodyGroup.add(body); bodyGroup.add(armL); bodyGroup.add(armR); bodyGroup.add(legL); bodyGroup.add(legR);
+    playerGroup.add(bodyGroup);
+
+    // Save references to the limbs in case we want to add walking animations later!
+    playerGroup.userData = { isPlayer: true, armL: armL, armR: armR, legL: legL, legR: legR };
+
+    // Set the starting position
+    playerGroup.position.set(pos.x, pos.y, pos.z);
+    
+    // Add to the game world
+    scene.add(playerGroup); 
+    otherPlayers[id] = playerGroup;
+}
+
 
         function createGuns() {
             const createSMG = (color) => {
