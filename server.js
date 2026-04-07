@@ -12,25 +12,26 @@ const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } 
 
 const players = {};
 const mobs = {};
+const worldBlocks = []; // The memory bank for built blocks
 let mobIdCounter = 0;
 
-// THE MASTER REFEREE: Controls all monsters
+// THE MASTER REFEREE
 setInterval(() => {
     const pKeys = Object.keys(players);
     if (pKeys.length > 0) {
         
-        // 1. Force EXACTLY 20 monsters to always exist on the map
+        // Force exactly 20 mobs
         while (Object.keys(mobs).length < 20) {
             let id = mobIdCounter++;
             let targetId = pKeys[Math.floor(Math.random() * pKeys.length)];
             let p = players[targetId];
             let angle = Math.random() * Math.PI * 2;
-            let dist = 25 + Math.random() * 15; // Spawn slightly further away
+            let dist = 25 + Math.random() * 15;
             mobs[id] = { id: id, x: p.x + Math.cos(angle)*dist, y: 0.5, z: p.z + Math.sin(angle)*dist };
             io.emit('mobSpawned', mobs[id]);
         }
 
-        // 2. Move monsters and kill them if they touch a player
+        // Move mobs and instant-kill on touch
         for (let id in mobs) {
             let mob = mobs[id];
             let closestP = null, closestD = 9999;
@@ -40,37 +41,39 @@ setInterval(() => {
             }
             
             if (closestP) {
-                // THE FIX: If monster touches player, INSTANT KILL!
                 if (closestD < 2.0) {
-                    io.emit('mobDied', id); // Tells all players to play the explosion effect
-                    delete mobs[id];        // Deletes it from the server instantly
-                    continue;               // Skip moving this deleted mob
+                    io.emit('mobDied', id); 
+                    delete mobs[id];        
+                    continue;               
                 }
-
                 let dx = closestP.x - mob.x, dz = closestP.z - mob.z;
                 let len = Math.hypot(dx, dz);
-                mob.x += (dx/len) * 0.15; // Monster speed
+                mob.x += (dx/len) * 0.15; 
                 mob.z += (dz/len) * 0.15;
             }
         }
-        io.emit('mobsUpdate', mobs); // Broadcast new positions
+        io.emit('mobsUpdate', mobs); 
     }
-}, 50); // Server ticks 20 times per second
+}, 50);
 
 io.on('connection', (socket) => {
-    // Give new players the current lobby AND current monsters
     players[socket.id] = { x: 0, y: 2, z: 0, ry: 0 };
     socket.emit('currentPlayers', players);
     socket.emit('currentMobs', mobs);
+    socket.emit('initBlocks', worldBlocks); // Send the whole built world to the new player
     socket.broadcast.emit('newPlayer', { id: socket.id, position: players[socket.id] });
 
-    // Track player movements AND rotations
+    // When someone builds, save it and broadcast it
+    socket.on('placeBlock', (data) => {
+        worldBlocks.push(data);
+        io.emit('blockPlaced', data);
+    });
+
     socket.on('playerMovement', (data) => {
         players[socket.id] = data;
         socket.broadcast.emit('playerMoved', { id: socket.id, position: data });
     });
 
-    // When someone shoots a monster, delete it and tell everyone!
     socket.on('mobKilled', (mobId) => {
         if (mobs[mobId]) {
             delete mobs[mobId];
@@ -86,3 +89,4 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
