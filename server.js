@@ -4,7 +4,11 @@ const { Server } = require("socket.io");
 const cors = require('cors');
 
 const app = express();
-app.use(cors()); // Allows your Netlify game to talk to this server
+app.use(cors());
+
+// 🌟 THIS IS THE MAGIC LINE 🌟
+// It tells Railway to display your index.html game to anyone who visits the link!
+app.use(express.static(__dirname));
 
 const server = http.createServer(app);
 const io = new Server(server, {
