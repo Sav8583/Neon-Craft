@@ -19,7 +19,6 @@ setInterval(() => {
     const pKeys = Object.keys(players);
     if (pKeys.length > 0) {
         
-        // LIMIT STRICTLY TO 15 MOBS
         while (Object.keys(mobs).length < 15) {
             let id = mobIdCounter++; let targetId = pKeys[Math.floor(Math.random() * pKeys.length)];
             let p = players[targetId]; let angle = Math.random() * Math.PI * 2; let dist = 25 + Math.random() * 15; 
@@ -31,17 +30,21 @@ setInterval(() => {
 
         for (let id in mobs) {
             let mob = mobs[id]; let closestP = null, closestD = 9999;
+            
             for (let pid in players) {
                 let p = players[pid];
-                let pY = p.y || 2; 
-                let d = Math.hypot(p.x - mob.x, pY - mob.y, p.z - mob.z);
-                if (d < closestD) { closestD = d; closestP = p; closestP.id = pid; }
+                // FIX: Calculate horizontal distance only for chasing!
+                let hDist = Math.hypot(p.x - mob.x, p.z - mob.z);
+                if (hDist < closestD) { closestD = hDist; closestP = p; closestP.id = pid; }
             }
+            
             if (closestP) {
-                if (closestD < 2.0) {
+                let pY = closestP.y || 2.0; 
+                let vDist = Math.abs(pY - mob.y);
+
+                // FIX: Cylinder Hitbox! If within 2.2 units horizontally and 3.0 units vertically -> DAMAGE!
+                if (closestD < 2.2 && vDist < 3.0) {
                     io.to(closestP.id).emit('playerHurt');
-                    
-                    // THE FIX: Save ID, delete, then broadcast the death to all clients immediately!
                     let deadMobId = id; 
                     delete mobs[id];        
                     io.emit('mobDied', deadMobId); 
@@ -52,7 +55,6 @@ setInterval(() => {
                 let moveX = (dx/len) * 0.15;
                 let moveZ = (dz/len) * 0.15;
 
-                // Collision detection
                 let hitX = false;
                 for(let b of blockArray) { if (Math.abs((mob.x + moveX) - b.x) < 2.2 && Math.abs(mob.z - b.z) < 2.2 && Math.abs(mob.y - b.y) < 3) hitX = true; }
                 if(!hitX) mob.x += moveX;
