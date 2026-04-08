@@ -243,17 +243,24 @@
             scene.add(sun);
         }
 
-        function createClouds() {
+                function createClouds() {
             const cloudGeo = new THREE.BoxGeometry(20, 5, 20);
-            const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, fog: false }); 
+            const solidMat = new THREE.MeshBasicMaterial({ color: 0x001111, fog: false }); // Dark core
+            
+            // CHANGE THIS LINE RIGHT HERE 👇
+            const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, fog: false }); 
+            
             for(let i=0; i<30; i++) {
-                const cloud = new THREE.Mesh(cloudGeo, cloudMat);
-                cloud.position.set((Math.random() - 0.5) * 400, 60 + Math.random() * 20, (Math.random() - 0.5) * 400);
-                cloud.scale.set(1 + Math.random()*2, 1, 1 + Math.random()*2);
-                scene.add(cloud);
-                clouds.push(cloud);
+                const cloudSolid = new THREE.Mesh(cloudGeo, solidMat);
+                const cloudWire = new THREE.Mesh(cloudGeo, wireMat);
+                cloudSolid.add(cloudWire);
+                cloudSolid.position.set((Math.random() - 0.5) * 400, 60 + Math.random() * 20, (Math.random() - 0.5) * 400);
+                cloudSolid.scale.set(1 + Math.random()*2, 1, 1 + Math.random()*2);
+                scene.add(cloudSolid);
+                clouds.push(cloudSolid);
             }
         }
+
 
         function selectColor(index, color) {
             selectedColor = color; let slots = document.querySelectorAll('.slot');
