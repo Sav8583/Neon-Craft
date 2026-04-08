@@ -247,7 +247,7 @@
         // 4. NEON WIREFRAME CLOUDS (Matching the ground!)
         function createClouds() {
             const cloudGeo = new THREE.BoxGeometry(20, 5, 20);
-            const solidMat = new THREE.MeshBasicMaterial({ color: 0x001111, fog: false }); // Dark core
+            const solidMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, fog: false }); // Dark core
             const wireMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, fog: false }); // Cyan wireframe
             for(let i=0; i<30; i++) {
                 const cloudSolid = new THREE.Mesh(cloudGeo, solidMat);
