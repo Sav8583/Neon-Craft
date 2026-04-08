@@ -204,8 +204,6 @@
 
         const container = document.getElementById('game-container'); 
 
-        let sunMaterial;
-
         // NAMETAG GENERATOR!
         function createTextSprite(msg) {
             const canvas = document.createElement('canvas');
@@ -216,32 +214,15 @@
             ctx.fillStyle = '#00ffff';
             ctx.fillText(msg, 128, 48);
             const tex = new THREE.CanvasTexture(canvas);
-            const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); // DepthTest false so it shows through blocks
+            const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); 
             const sprite = new THREE.Sprite(spriteMat);
             sprite.scale.set(4, 1, 1);
-            sprite.position.y = 4.2; // Above the player's head
+            sprite.position.y = 4.2; 
             return sprite;
         }
 
         function create3DRainbowSun() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            const gradient = ctx.createLinearGradient(0, 0, 512, 0);
-            gradient.addColorStop(0, "red"); gradient.addColorStop(0.15, "orange");
-            gradient.addColorStop(0.33, "yellow"); gradient.addColorStop(0.5, "green");
-            gradient.addColorStop(0.66, "cyan"); gradient.addColorStop(0.8, "blue");
-            gradient.addColorStop(0.9, "violet"); gradient.addColorStop(1, "red");
-            ctx.fillStyle = gradient; ctx.fillRect(0, 0, 512, 512);
-
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.wrapS = THREE.RepeatWrapping; 
-
-            sunMaterial = new THREE.MeshBasicMaterial({ map: tex, fog: false });
-            const sun = new THREE.Mesh(new THREE.SphereGeometry(60, 32, 32), sunMaterial);
-            sun.position.set(0, 150, -400); // Fixed position in sky
-            scene.add(sun);
-
+            // THE FIX (Part 1/2): Build the *glow* as a soft radial Sprite, exactly as your screenshit requires
             const glowCanvas = document.createElement('canvas');
             glowCanvas.width = 256; glowCanvas.height = 256;
             const gCtx = glowCanvas.getContext('2d');
@@ -254,8 +235,34 @@
             const glowMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(glowCanvas), transparent: true, blending: THREE.AdditiveBlending, fog: false });
             const glow = new THREE.Sprite(glowMat);
             glow.scale.set(280, 280, 1);
-            glow.position.set(0, 150, -405); 
+            glow.position.set(0, 150, -405); // Just behind the main sun circle
             scene.add(glow);
+
+            // THE FIX (Part 2/2): Rebuild the main Sun as a flat 2D Sprite to meet the "look 2D" request!
+            const sunTexCanvas = document.createElement('canvas');
+            sunTexCanvas.width = 512; sunTexCanvas.height = 512;
+            const ctx = sunTexCanvas.getContext('2d');
+            
+            // css linear gradient exact mapping
+            const gradient = ctx.createLinearGradient(0, 0, 512, 512); 
+            gradient.addColorStop(0, "red"); gradient.addColorStop(0.16, "orange");
+            gradient.addColorStop(0.33, "yellow"); gradient.addColorStop(0.5, "green");
+            gradient.addColorStop(0.66, "cyan"); gradient.addColorStop(0.83, "blue");
+            gradient.addColorStop(1, "violet");
+            
+            ctx.fillStyle = gradient;
+            
+            // Draw a sharp circle like the screenshit requires
+            ctx.beginPath();
+            ctx.arc(256, 256, 250, 0, Math.PI * 2);
+            ctx.fill();
+
+            const tex = new THREE.CanvasTexture(sunTexCanvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, fog: false });
+            const sunSprite = new THREE.Sprite(mat);
+            sunSprite.scale.set(120, 120, 1);
+            sunSprite.position.set(0, 150, -400); // Fixed position in the 3D sky
+            scene.add(sunSprite);
         }
 
         function selectColor(index, color) {
@@ -286,8 +293,7 @@
         function initEngine() {
             scene = new THREE.Scene(); scene.background = new THREE.Color(0x050508); scene.fog = new THREE.Fog(0x050508, 15, 60); 
             
-            // THE FIX: Increased the far view distance from 100 to 1000 so the sun is visible!
-            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000); // Far distance kept so sun is visible
             
             camera.rotation.order = 'YXZ'; camera.position.y = 2; scene.add(camera);
             renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(container.clientWidth, container.clientHeight);
@@ -435,7 +441,8 @@
 
                 if (Math.hypot(camera.position.x - mob.position.x, camera.position.y - mob.position.y, camera.position.z - mob.position.z) < 2) { 
                     playerTakeDamage();
-                    scene.remove(mob); mobs.splice(i, 1); 
+                    scene.remove(mob); // Single player removal
+                    mobs.splice(i, 1);  
                 } 
             } 
         }
@@ -455,8 +462,6 @@
         function animate() {
             requestAnimationFrame(animate);
             const time = performance.now(); const delta = (time - prevTime) / 1000;
-
-            if (sunMaterial && sunMaterial.map) { sunMaterial.map.offset.x -= 0.2 * delta; }
 
             if (leftGun && rightGun) {
                 leftGun.position.z += (-0.6 - leftGun.position.z) * 0.1; leftGun.rotation.x += (0 - leftGun.rotation.x) * 0.1;    
@@ -483,7 +488,6 @@
             // Make name tags always face the camera
             Object.values(otherPlayers).forEach(p => {
                 if(p.userData.nameSprite) {
-                    // Temporarily undo the player's body rotation so the tag doesn't spin wildly
                     p.userData.nameSprite.quaternion.copy(camera.quaternion).multiply(p.quaternion.clone().invert());
                 }
             });
