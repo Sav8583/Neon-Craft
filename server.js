@@ -19,7 +19,7 @@ setInterval(() => {
     const pKeys = Object.keys(players);
     if (pKeys.length > 0) {
         
-        // REDUCED TO 15 MOBS FOR BETTER PERFORMANCE
+        // LIMIT STRICTLY TO 15 MOBS
         while (Object.keys(mobs).length < 15) {
             let id = mobIdCounter++; let targetId = pKeys[Math.floor(Math.random() * pKeys.length)];
             let p = players[targetId]; let angle = Math.random() * Math.PI * 2; let dist = 25 + Math.random() * 15; 
@@ -40,7 +40,11 @@ setInterval(() => {
             if (closestP) {
                 if (closestD < 2.0) {
                     io.to(closestP.id).emit('playerHurt');
+                    
+                    // THE FIX: Save ID, delete, then broadcast the death to all clients immediately!
+                    let deadMobId = id; 
                     delete mobs[id];        
+                    io.emit('mobDied', deadMobId); 
                     continue;               
                 }
 
@@ -48,7 +52,7 @@ setInterval(() => {
                 let moveX = (dx/len) * 0.15;
                 let moveZ = (dz/len) * 0.15;
 
-                // TWEAKED COLLISION (2.2 instead of 2.5) so they slide around corners better
+                // Collision detection
                 let hitX = false;
                 for(let b of blockArray) { if (Math.abs((mob.x + moveX) - b.x) < 2.2 && Math.abs(mob.z - b.z) < 2.2 && Math.abs(mob.y - b.y) < 3) hitX = true; }
                 if(!hitX) mob.x += moveX;
