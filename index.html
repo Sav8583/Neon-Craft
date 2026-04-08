@@ -201,13 +201,16 @@
         const builtBlocks = []; 
         let selectedColor = 0x00ffff; const colorList = [0x00ffff, 0xff00ff, 0x39ff14, 0xffff00, 0xff0000];
 
-        // WEAPONS
+                // WEAPONS
         let currentWeapon = 0; // 0 = SMG, 1 = Shotgun
         let singlePlayerMobTimer, leftGun, rightGun;
         const TILE_SIZE = 4, GRID_SIZE = 20; 
 
+        const container = document.getElementById('game-container'); // <--- PASTE THIS LINE HERE!
+
         function selectColor(index, color) {
             selectedColor = color; let slots = document.querySelectorAll('.slot');
+
             slots.forEach(s => s.classList.remove('active')); slots[index].classList.add('active');
         }
 
