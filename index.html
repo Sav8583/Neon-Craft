@@ -8,39 +8,9 @@
         :root { --neon-cyan: #00ffff; --neon-pink: #ff00ff; --neon-green: #39ff14; --neon-red: #ff0000; --bg-color: #050508; }
         * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; }
         body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
-        
         #game-container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg-color); box-shadow: 0 0 20px var(--neon-cyan); }
         @media (min-width: 1024px) { #game-container { height: 56.25vw; max-height: 100vh; max-width: 177.78vh; } }
         
-        /* THIS KEEPS THE 3D GAME ON TOP OF THE SUN, BUT BEHIND THE UI */
-        canvas { position: absolute; top: 0; left: 0; z-index: 5; }
-
-        /* --- THE MAGIC CSS SUN --- */
-        .rainbow-circle {
-            position: absolute;
-            top: 25%;
-            left: 50%;
-            width: 240px;
-            height: 240px;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            /* Added tons of extra colors to the gradient! */
-            background: linear-gradient(45deg, #ff0000, #ff7f00, #ffff00, #39ff14, #00ffff, #0000ff, #8b00ff, #ff00ff, #ff0055);
-            background-size: 400% 400%;
-            animation: rainbowMove 6s linear infinite;
-            filter: blur(8px);
-            box-shadow: 0 0 80px rgba(255, 255, 255, 0.6), 0 0 120px rgba(0, 255, 255, 0.4);
-            z-index: 2; /* Sits completely behind the 3D world */
-            pointer-events: none;
-        }
-
-        @keyframes rainbowMove {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-        /* -------------------------- */
-
         .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(5, 5, 8, 0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 100; }
         .title { font-size: 3rem; margin-bottom: 10px; font-weight: bold; color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan); text-align: center; text-transform: uppercase; letter-spacing: 5px; }
         .auth-box { background: rgba(0, 255, 255, 0.05); border: 2px solid var(--neon-cyan); padding: 30px; border-radius: 10px; box-shadow: 0 0 15px rgba(0,255,255,0.2); display: flex; flex-direction: column; gap: 15px; width: 300px; pointer-events: auto; }
@@ -86,8 +56,6 @@
     <div id="rotate-warning"><div>📱</div><p>Please rotate horizontally to play.</p></div>
 
     <div id="game-container">
-        <div class="rainbow-circle" id="sky-sun" style="display: none;"></div>
-
         <div id="auth-screen" class="overlay">
             <div class="title">Neon Craft <br><span style="font-size: 1.5rem; color: #39ff14">Online</span></div>
             <div class="auth-box">
@@ -236,6 +204,47 @@
 
         const container = document.getElementById('game-container'); 
 
+        // THE NEW 3D RAINBOW SUN MATERIAL!
+        let sunMaterial;
+
+        function create3DRainbowSun() {
+            // 1. Create the animating texture (exactly like your CSS!)
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 512, 0);
+            gradient.addColorStop(0, "red"); gradient.addColorStop(0.15, "orange");
+            gradient.addColorStop(0.33, "yellow"); gradient.addColorStop(0.5, "green");
+            gradient.addColorStop(0.66, "cyan"); gradient.addColorStop(0.8, "blue");
+            gradient.addColorStop(0.9, "violet"); gradient.addColorStop(1, "red");
+            ctx.fillStyle = gradient; ctx.fillRect(0, 0, 512, 512);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; // Allows it to slide/animate!
+
+            // 2. Build the physical Sun Sphere
+            sunMaterial = new THREE.MeshBasicMaterial({ map: tex, fog: false });
+            const sun = new THREE.Mesh(new THREE.SphereGeometry(60, 32, 32), sunMaterial);
+            sun.position.set(0, 150, -300); // FIXED IN THE 3D SKY!
+            scene.add(sun);
+
+            // 3. Add the glowing Halo behind it
+            const glowCanvas = document.createElement('canvas');
+            glowCanvas.width = 256; glowCanvas.height = 256;
+            const gCtx = glowCanvas.getContext('2d');
+            const gGrad = gCtx.createRadialGradient(128,128,0, 128,128,128);
+            gGrad.addColorStop(0, 'rgba(255,255,255,0.8)');
+            gGrad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+            gGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            gCtx.fillStyle = gGrad; gCtx.fillRect(0,0,256,256);
+            
+            const glowMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(glowCanvas), transparent: true, blending: THREE.AdditiveBlending, fog: false });
+            const glow = new THREE.Sprite(glowMat);
+            glow.scale.set(280, 280, 1);
+            glow.position.set(0, 150, -305); // Just behind the sun
+            scene.add(glow);
+        }
+
         function selectColor(index, color) {
             selectedColor = color; let slots = document.querySelectorAll('.slot');
             slots.forEach(s => s.classList.remove('active')); slots[index].classList.add('active');
@@ -251,10 +260,6 @@
             document.getElementById('menu').style.display = 'none'; document.getElementById('crosshair').style.display = 'block';
             document.getElementById('hud').style.display = 'block'; document.getElementById('fullscreen-btn').style.display = 'block';
             document.getElementById('quit-btn').style.display = 'block'; document.getElementById('hotbar').style.display = 'flex';
-            
-            // Turn on the CSS Sun!
-            document.getElementById('sky-sun').style.display = 'block';
-
             currentScore = 0; document.getElementById('score-board').innerText = "SCORE: 0";
             currentHP = maxHP; updateHPDisplay(); 
 
@@ -266,18 +271,14 @@
         }
 
         function initEngine() {
-            scene = new THREE.Scene(); 
-            // We removed the solid black background here so the CSS sun shows through!
-            scene.fog = new THREE.Fog(0x050508, 15, 60); 
-            
+            scene = new THREE.Scene(); scene.background = new THREE.Color(0x050508); scene.fog = new THREE.Fog(0x050508, 15, 60); 
             camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 100);
             camera.rotation.order = 'YXZ'; camera.position.y = 2; scene.add(camera);
-            
-            // Added alpha: true to make the canvas transparent!
-            renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true }); 
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(renderer.domElement); raycaster = new THREE.Raycaster();
             window.addEventListener('resize', () => { camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); });
+            
+            create3DRainbowSun(); // Add the sun to the sky!
         }
 
         function setupMultiplayer() {
@@ -329,7 +330,6 @@
             if (currentHP <= 0) respawnPlayer();
         }
 
-        // NO MORE ALERT BOX! Cool text overlay instead.
         function respawnPlayer() {
             const deathMsg = document.createElement('div');
             deathMsg.innerText = "DEFEATED!";
@@ -392,7 +392,6 @@
                 mob.userData.animTime += delta * 12; 
                 const swing = Math.sin(mob.userData.animTime) * 0.8; mob.userData.legL.rotation.x = swing; mob.userData.legR.rotation.x = -swing; mob.userData.armL.rotation.x = -swing; mob.userData.armR.rotation.x = swing; 
                 
-                // Single-player Block Collision 
                 let hitBlock = false;
                 for(let b of builtBlocks) { if(Math.abs(mob.position.x - b.position.x) < 2.5 && Math.abs(mob.position.z - b.position.z) < 2.5 && Math.abs(mob.position.y - b.position.y) < 3) hitBlock = true; }
                 if(hitBlock) mob.position.copy(oldPos);
@@ -419,6 +418,11 @@
         function animate() {
             requestAnimationFrame(animate);
             const time = performance.now(); const delta = (time - prevTime) / 1000;
+
+            // ANIMATE THE 3D RAINBOW SUN
+            if (sunMaterial && sunMaterial.map) {
+                sunMaterial.map.offset.x -= 0.2 * delta; // Creates the color-shifting rainbow effect!
+            }
 
             if (leftGun && rightGun) {
                 leftGun.position.z += (-0.6 - leftGun.position.z) * 0.1; leftGun.rotation.x += (0 - leftGun.rotation.x) * 0.1;    
