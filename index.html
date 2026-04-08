@@ -204,11 +204,26 @@
 
         const container = document.getElementById('game-container'); 
 
-        // THE NEW 3D RAINBOW SUN MATERIAL!
         let sunMaterial;
 
+        // NAMETAG GENERATOR!
+        function createTextSprite(msg) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.font = 'bold 28px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#00ffff';
+            ctx.fillText(msg, 128, 48);
+            const tex = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); // DepthTest false so it shows through blocks
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(4, 1, 1);
+            sprite.position.y = 4.2; // Above the player's head
+            return sprite;
+        }
+
         function create3DRainbowSun() {
-            // 1. Create the animating texture (exactly like your CSS!)
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
@@ -220,15 +235,13 @@
             ctx.fillStyle = gradient; ctx.fillRect(0, 0, 512, 512);
 
             const tex = new THREE.CanvasTexture(canvas);
-            tex.wrapS = THREE.RepeatWrapping; // Allows it to slide/animate!
+            tex.wrapS = THREE.RepeatWrapping; 
 
-            // 2. Build the physical Sun Sphere
             sunMaterial = new THREE.MeshBasicMaterial({ map: tex, fog: false });
             const sun = new THREE.Mesh(new THREE.SphereGeometry(60, 32, 32), sunMaterial);
-            sun.position.set(0, 150, -300); // FIXED IN THE 3D SKY!
+            sun.position.set(0, 150, -400); // Fixed position in sky
             scene.add(sun);
 
-            // 3. Add the glowing Halo behind it
             const glowCanvas = document.createElement('canvas');
             glowCanvas.width = 256; glowCanvas.height = 256;
             const gCtx = glowCanvas.getContext('2d');
@@ -241,7 +254,7 @@
             const glowMat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(glowCanvas), transparent: true, blending: THREE.AdditiveBlending, fog: false });
             const glow = new THREE.Sprite(glowMat);
             glow.scale.set(280, 280, 1);
-            glow.position.set(0, 150, -305); // Just behind the sun
+            glow.position.set(0, 150, -405); 
             scene.add(glow);
         }
 
@@ -272,13 +285,16 @@
 
         function initEngine() {
             scene = new THREE.Scene(); scene.background = new THREE.Color(0x050508); scene.fog = new THREE.Fog(0x050508, 15, 60); 
-            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 100);
+            
+            // THE FIX: Increased the far view distance from 100 to 1000 so the sun is visible!
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            
             camera.rotation.order = 'YXZ'; camera.position.y = 2; scene.add(camera);
             renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(renderer.domElement); raycaster = new THREE.Raycaster();
             window.addEventListener('resize', () => { camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); });
             
-            create3DRainbowSun(); // Add the sun to the sky!
+            create3DRainbowSun(); 
         }
 
         function setupMultiplayer() {
@@ -288,7 +304,17 @@
             
             socket.on('playerMoved', (data) => {
                 if (otherPlayers[data.id]) {
-                    let p = otherPlayers[data.id]; let dist = Math.hypot(p.position.x - data.position.x, p.position.z - data.position.z);
+                    let p = otherPlayers[data.id]; 
+
+                    // UPDATE NAMETAG IF IT ARRIVES
+                    if(data.position.username && p.userData.username !== data.position.username) {
+                        p.userData.username = data.position.username;
+                        if(p.userData.nameSprite) p.remove(p.userData.nameSprite);
+                        p.userData.nameSprite = createTextSprite(data.position.username);
+                        p.add(p.userData.nameSprite);
+                    }
+
+                    let dist = Math.hypot(p.position.x - data.position.x, p.position.z - data.position.z);
                     p.userData.animTime = (p.userData.animTime || 0) + dist * 10; let swing = Math.sin(p.userData.animTime) * 0.8;
                     p.userData.legL.rotation.x = swing; p.userData.legR.rotation.x = -swing; p.userData.armL.rotation.x = -swing; p.userData.armR.rotation.x = swing;
                     p.position.set(data.position.x, data.position.y, data.position.z); 
@@ -363,7 +389,16 @@
             const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75));
             const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9));
             bodyGroup.add(head); bodyGroup.add(body); bodyGroup.add(armL); bodyGroup.add(armR); bodyGroup.add(legL); bodyGroup.add(legR); playerGroup.add(bodyGroup);
-            playerGroup.userData = { isPlayer: true, head: head, armL: armL, armR: armR, legL: legL, legR: legR, animTime: 0 };
+            playerGroup.userData = { isPlayer: true, head: head, armL: armL, armR: armR, legL: legL, legR: legR, animTime: 0, username: "" };
+            
+            // Add Nametag if available on connection
+            if(pos.username) {
+                const tag = createTextSprite(pos.username);
+                playerGroup.add(tag);
+                playerGroup.userData.username = pos.username;
+                playerGroup.userData.nameSprite = tag;
+            }
+
             playerGroup.position.set(pos.x, pos.y, pos.z); if (pos.ry !== undefined) playerGroup.rotation.y = pos.ry;
             scene.add(playerGroup); otherPlayers[id] = playerGroup;
         }
@@ -381,7 +416,9 @@
 
         function killServerMob(mobId) { if (serverMobs[mobId]) { const hitObj = serverMobs[mobId]; const blast = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true, transparent: true, opacity: 1 })); blast.position.copy(hitObj.position); blast.position.y += 1.2; scene.add(blast); deathEffects.push({ mesh: blast, age: 0 }); dropOrbs(hitObj.position); scene.remove(hitObj); delete serverMobs[mobId]; } }
         
-        function spawnHumanoidMob() { if (mobs.length > 15) return; const mobGroup = new THREE.Group(); mobGroup.userData = { isMob: true, speed: 5 + Math.random() * 4, animTime: Math.random() * 10 }; const matWire = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); const matSolid = new THREE.MeshBasicMaterial({ color: 0x110011 }); const matEye = new THREE.MeshBasicMaterial({ color: 0xff0000 }); const buildPart = (w, h, d, yPos) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); const w2 = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); m.add(w2); m.position.y = yPos; return m; }; const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR); const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75)); const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9)); mobGroup.add(head); mobGroup.add(body); mobGroup.add(armL); mobGroup.add(armR); mobGroup.add(legL); mobGroup.add(legR); mobGroup.userData.armL = armL; mobGroup.userData.armR = armR; mobGroup.userData.legL = legL; mobGroup.userData.legR = legR; const angle = Math.random() * Math.PI * 2, dist = 25 + Math.random() * 15; mobGroup.position.set(camera.position.x + Math.cos(angle) * dist, 0.5, camera.position.z + Math.sin(angle) * dist); scene.add(mobGroup); mobs.push(mobGroup); }
+        function spawnHumanoidMob() { 
+            if (mobs.length > 15) return; // FIX: Strict 15 limit
+            const mobGroup = new THREE.Group(); mobGroup.userData = { isMob: true, speed: 5 + Math.random() * 4, animTime: Math.random() * 10 }; const matWire = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); const matSolid = new THREE.MeshBasicMaterial({ color: 0x110011 }); const matEye = new THREE.MeshBasicMaterial({ color: 0xff0000 }); const buildPart = (w, h, d, yPos) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); const w2 = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); m.add(w2); m.position.y = yPos; return m; }; const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR); const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75)); const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9)); mobGroup.add(head); mobGroup.add(body); mobGroup.add(armL); mobGroup.add(armR); mobGroup.add(legL); mobGroup.add(legR); mobGroup.userData.armL = armL; mobGroup.userData.armR = armR; mobGroup.userData.legL = legL; mobGroup.userData.legR = legR; const angle = Math.random() * Math.PI * 2, dist = 25 + Math.random() * 15; mobGroup.position.set(camera.position.x + Math.cos(angle) * dist, 0.5, camera.position.z + Math.sin(angle) * dist); scene.add(mobGroup); mobs.push(mobGroup); }
         
         function updateMobs(delta) { 
             for (let i = mobs.length - 1; i >= 0; i--) { 
@@ -393,7 +430,7 @@
                 const swing = Math.sin(mob.userData.animTime) * 0.8; mob.userData.legL.rotation.x = swing; mob.userData.legR.rotation.x = -swing; mob.userData.armL.rotation.x = -swing; mob.userData.armR.rotation.x = swing; 
                 
                 let hitBlock = false;
-                for(let b of builtBlocks) { if(Math.abs(mob.position.x - b.position.x) < 2.5 && Math.abs(mob.position.z - b.position.z) < 2.5 && Math.abs(mob.position.y - b.position.y) < 3) hitBlock = true; }
+                for(let b of builtBlocks) { if(Math.abs(mob.position.x - b.position.x) < 2.2 && Math.abs(mob.position.z - b.position.z) < 2.2 && Math.abs(mob.position.y - b.position.y) < 3) hitBlock = true; }
                 if(hitBlock) mob.position.copy(oldPos);
 
                 if (Math.hypot(camera.position.x - mob.position.x, camera.position.y - mob.position.y, camera.position.z - mob.position.z) < 2) { 
@@ -419,10 +456,7 @@
             requestAnimationFrame(animate);
             const time = performance.now(); const delta = (time - prevTime) / 1000;
 
-            // ANIMATE THE 3D RAINBOW SUN
-            if (sunMaterial && sunMaterial.map) {
-                sunMaterial.map.offset.x -= 0.2 * delta; // Creates the color-shifting rainbow effect!
-            }
+            if (sunMaterial && sunMaterial.map) { sunMaterial.map.offset.x -= 0.2 * delta; }
 
             if (leftGun && rightGun) {
                 leftGun.position.z += (-0.6 - leftGun.position.z) * 0.1; leftGun.rotation.x += (0 - leftGun.rotation.x) * 0.1;    
@@ -436,13 +470,24 @@
             if (deviceType === 'pc' && controls && controls.isLocked) { controls.moveRight(velocity.x * delta); controls.moveForward(-velocity.z * delta); } else if (deviceType === 'mobile') { const vec = new THREE.Vector3(velocity.x * delta, 0, velocity.z * delta); vec.applyEuler(new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')); camera.position.add(vec); }
             let currentFloorLevel = getFloorHeight(); camera.position.y += velocity.y * delta; if (camera.position.y < currentFloorLevel) { velocity.y = 0; camera.position.y = currentFloorLevel; canJump = true; }
 
-            if (selectedMode === 'multi' && socket) socket.emit('playerMovement', { x: camera.position.x, y: camera.position.y, z: camera.position.z, rx: camera.rotation.x, ry: camera.rotation.y });
+            // SEND USERNAME WITH MOVEMENT TO DISPLAY NAMETAG!
+            if (selectedMode === 'multi' && socket) socket.emit('playerMovement', { x: camera.position.x, y: camera.position.y, z: camera.position.z, rx: camera.rotation.x, ry: camera.rotation.y, username: currentUser });
+            
             updateInfiniteFloor(); 
             if (selectedMode === 'single') updateMobs(delta);
 
             for (let i = lasers.length - 1; i >= 0; i--) { lasers[i].age += delta; if (lasers[i].age > 0.08) { scene.remove(lasers[i].mesh); lasers.splice(i, 1); } }
             for (let i = deathEffects.length - 1; i >= 0; i--) { deathEffects[i].age += delta; deathEffects[i].mesh.scale.addScalar(delta * 10); deathEffects[i].mesh.material.opacity -= delta * 2; if (deathEffects[i].mesh.material.opacity <= 0) { scene.remove(deathEffects[i].mesh); deathEffects.splice(i, 1); } }
             for (let i = orbs.length - 1; i >= 0; i--) { let o = orbs[i]; o.age += delta; o.vy -= 25 * delta; o.mesh.position.x += o.vx * delta; o.mesh.position.y += o.vy * delta; o.mesh.position.z += o.vz * delta; if (o.mesh.position.y <= 0.8) { o.mesh.position.y = 0.8; o.vy *= -0.5; o.vx *= 0.8; o.vz *= 0.8; } if (o.age > 4) { scene.remove(o.mesh); orbs.splice(i, 1); } }
+            
+            // Make name tags always face the camera
+            Object.values(otherPlayers).forEach(p => {
+                if(p.userData.nameSprite) {
+                    // Temporarily undo the player's body rotation so the tag doesn't spin wildly
+                    p.userData.nameSprite.quaternion.copy(camera.quaternion).multiply(p.quaternion.clone().invert());
+                }
+            });
+
             prevTime = time; renderer.render(scene, camera);
         }
 
