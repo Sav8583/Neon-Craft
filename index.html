@@ -14,29 +14,6 @@
         
         canvas { position: absolute; top: 0; left: 0; z-index: 5; }
 
-        .rainbow-circle {
-            position: absolute;
-            top: 25%;
-            left: 50%;
-            width: 240px;
-            height: 240px;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            background: linear-gradient(45deg, #ff0000, #ff7f00, #ffff00, #39ff14, #00ffff, #0000ff, #8b00ff, #ff00ff, #ff0055);
-            background-size: 400% 400%;
-            animation: rainbowMove 6s linear infinite;
-            filter: blur(8px);
-            box-shadow: 0 0 80px rgba(255, 255, 255, 0.6), 0 0 120px rgba(0, 255, 255, 0.4);
-            z-index: 2; 
-            pointer-events: none;
-        }
-
-        @keyframes rainbowMove {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-        }
-
         .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(5, 5, 8, 0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 100; }
         .title { font-size: 3rem; margin-bottom: 10px; font-weight: bold; color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan); text-align: center; text-transform: uppercase; letter-spacing: 5px; }
         .auth-box { background: rgba(0, 255, 255, 0.05); border: 2px solid var(--neon-cyan); padding: 30px; border-radius: 10px; box-shadow: 0 0 15px rgba(0,255,255,0.2); display: flex; flex-direction: column; gap: 15px; width: 300px; pointer-events: auto; }
@@ -82,8 +59,6 @@
     <div id="rotate-warning"><div>📱</div><p>Please rotate horizontally to play.</p></div>
 
     <div id="game-container">
-        <div class="rainbow-circle" id="sky-sun" style="display: none;"></div>
-
         <div id="auth-screen" class="overlay">
             <div class="title">Neon Craft <br><span style="font-size: 1.5rem; color: #39ff14">Online</span></div>
             <div class="auth-box">
@@ -148,6 +123,13 @@
         </div>
     </div>
 
+    <script id="sun-vertex" type="x-shader/x-vertex">
+        varying vec3 vNormal; void main() { vNormal = normalize( normalMatrix * normal ); gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }
+    </script>
+    <script id="sun-fragment" type="x-shader/x-fragment">
+        varying vec3 vNormal; uniform float time; void main() { float c = 1.0; float intensity = pow( 0.9 - dot( vNormal, vec3( 0.0, 0.0, 1.0 ) ), 2.5 ); float r = 0.5 + 0.5 * sin(time + 0.0); float g = 0.5 + 0.5 * sin(time + 2.0); float b = 0.5 + 0.5 * sin(time + 4.0); vec3 neonColor = vec3(r, g, b); vec3 finalGlow = vec3(0.0) + neonColor * intensity; float fuzzyEdge = 0.95 - dot(vNormal, vec3(0.0, 0.0, 1.0)); vec3 deepColors = vec3(fuzzyEdge, 1.0 - fuzzyEdge, sin(time + fuzzyEdge * 5.0) * fuzzyEdge); vec3 cFinal = (vec3(0.0, 0.8, 1.0) * (fuzzyEdge - 0.2) + neonColor) * fuzzyEdge; float smooth_alpha = smoothstep(0.0, 0.4, fuzzyEdge); float soft_center = smoothstep(1.0, 0.9, fuzzyEdge); gl_FragColor = vec4(cFinal * 2.0, (smooth_alpha * soft_center) * fuzzyEdge); }
+    </script>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -163,7 +145,6 @@
         };
         firebase.initializeApp(firebaseConfig); const auth = firebase.auth(); const db = firebase.firestore();
         let currentUser = "Guest", highScore = 0, currentScore = 0, selectedMode = 'single';
-        
         let maxHP = 20, currentHP = 20; 
 
         auth.onAuthStateChanged((user) => { if (user) fetchCloudScore(user.email.split('@')[0]); });
@@ -232,10 +213,12 @@
 
         const container = document.getElementById('game-container'); 
         
-        // NEW CLOUD ARRAY
+        // Clouds Array
         const clouds = [];
 
-        // LOWERED NAMETAG (3.8 instead of 4.2)
+        // 2. The Sun Material Reference
+        let sunMaterial;
+
         function createTextSprite(msg) {
             const canvas = document.createElement('canvas');
             canvas.width = 256; canvas.height = 64;
@@ -248,20 +231,32 @@
             const spriteMat = new THREE.SpriteMaterial({ map: tex, depthTest: false }); 
             const sprite = new THREE.Sprite(spriteMat);
             sprite.scale.set(4, 1, 1);
-            sprite.position.y = 3.8; // PERFECTLY ABOVE HEAD
+            sprite.position.y = 3.8; 
             return sprite;
         }
 
+        // 3. Spawning the True 3D Shader Sun
+        function createGlowSun() {
+            sunMaterial = new THREE.ShaderMaterial({ uniforms: { time: { value: 1.0 } }, vertexShader: document.getElementById('sun-vertex').textContent, fragmentShader: document.getElementById('sun-fragment').textContent, transparent: true, blending: THREE.AdditiveBlending, fog: false });
+            const sunGeometry = new THREE.SphereGeometry(60, 32, 32); 
+            const sun = new THREE.Mesh(sunGeometry, sunMaterial); 
+            sun.position.set(0, 150, -300); // High up in the sky void!
+            scene.add(sun);
+        }
+
+        // 4. NEON WIREFRAME CLOUDS (Matching the ground!)
         function createClouds() {
             const cloudGeo = new THREE.BoxGeometry(20, 5, 20);
-            const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, fog: false });
+            const solidMat = new THREE.MeshBasicMaterial({ color: 0x001111, fog: false }); // Dark core
+            const wireMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true, fog: false }); // Cyan wireframe
             for(let i=0; i<30; i++) {
-                const cloud = new THREE.Mesh(cloudGeo, cloudMat);
-                // Scatter them randomly in the sky
-                cloud.position.set((Math.random() - 0.5) * 400, 60 + Math.random() * 20, (Math.random() - 0.5) * 400);
-                cloud.scale.set(1 + Math.random()*2, 1, 1 + Math.random()*2); // Minecraft blocky clouds!
-                scene.add(cloud);
-                clouds.push(cloud);
+                const cloudSolid = new THREE.Mesh(cloudGeo, solidMat);
+                const cloudWire = new THREE.Mesh(cloudGeo, wireMat);
+                cloudSolid.add(cloudWire);
+                cloudSolid.position.set((Math.random() - 0.5) * 400, 60 + Math.random() * 20, (Math.random() - 0.5) * 400);
+                cloudSolid.scale.set(1 + Math.random()*2, 1, 1 + Math.random()*2);
+                scene.add(cloudSolid);
+                clouds.push(cloudSolid);
             }
         }
 
@@ -280,8 +275,6 @@
             document.getElementById('menu').style.display = 'none'; document.getElementById('crosshair').style.display = 'block';
             document.getElementById('hud').style.display = 'block'; document.getElementById('fullscreen-btn').style.display = 'block';
             document.getElementById('quit-btn').style.display = 'block'; document.getElementById('hotbar').style.display = 'flex';
-            
-            document.getElementById('sky-sun').style.display = 'block';
 
             currentScore = 0; document.getElementById('score-board').innerText = "SCORE: 0";
             currentHP = maxHP; updateHPDisplay(); 
@@ -296,14 +289,15 @@
         function initEngine() {
             scene = new THREE.Scene(); 
             scene.fog = new THREE.Fog(0x050508, 15, 60); 
-            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000); // Keeps vision wide to see sun!
             camera.rotation.order = 'YXZ'; camera.position.y = 2; scene.add(camera);
             renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true }); 
             renderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(renderer.domElement); raycaster = new THREE.Raycaster();
             window.addEventListener('resize', () => { camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); });
             
-            createClouds(); // ADD CLOUDS TO SKY
+            createGlowSun(); // Bring back the glowing 3D sun
+            createClouds(); // Spawn the new wireframe clouds
         }
 
         function setupMultiplayer() {
@@ -441,7 +435,6 @@
                 for(let b of builtBlocks) { if(Math.abs(mob.position.x - b.position.x) < 2.2 && Math.abs(mob.position.z - b.position.z) < 2.2 && Math.abs(mob.position.y - b.position.y) < 3) hitBlock = true; }
                 if(hitBlock) mob.position.copy(oldPos);
 
-                // FIX: Single-player Cylinder Hitbox
                 let hDist = Math.hypot(camera.position.x - mob.position.x, camera.position.z - mob.position.z);
                 let vDist = Math.abs(camera.position.y - mob.position.y);
                 if (hDist < 2.2 && vDist < 3.0) { 
@@ -460,7 +453,6 @@
             const geoFloor = new THREE.BoxGeometry(TILE_SIZE, 0.5, TILE_SIZE); 
             for (let x = -GRID_SIZE/2; x < GRID_SIZE/2; x++) { 
                 for (let z = -GRID_SIZE/2; z < GRID_SIZE/2; z++) { 
-                    // THE FIX: GREEN GROUND
                     const solid = new THREE.Mesh(geoFloor, new THREE.MeshBasicMaterial({ color: 0x001a00 })); 
                     const wire = new THREE.Mesh(geoFloor, new THREE.MeshBasicMaterial({ color: 0x39ff14, wireframe: true })); 
                     solid.add(wire); solid.position.set(x * TILE_SIZE, 0, z * TILE_SIZE); scene.add(solid); floorTiles.push(solid); 
@@ -478,6 +470,9 @@
         function animate() {
             requestAnimationFrame(animate);
             const time = performance.now(); const delta = (time - prevTime) / 1000;
+            
+            // ANIMATE THE 3D SHADER ORB!
+            if (sunMaterial) { sunMaterial.uniforms.time.value += delta; }
 
             if (leftGun && rightGun) {
                 leftGun.position.z += (-0.6 - leftGun.position.z) * 0.1; leftGun.rotation.x += (0 - leftGun.rotation.x) * 0.1;    
@@ -498,8 +493,8 @@
 
             // ANIMATE CLOUDS
             clouds.forEach(c => {
-                c.position.x += 3.0 * delta; // Wind blows them slowly!
-                if (c.position.x > 250) c.position.x = -250; // Wrap around map
+                c.position.x += 3.0 * delta; 
+                if (c.position.x > 250) c.position.x = -250; 
             });
 
             for (let i = lasers.length - 1; i >= 0; i--) { lasers[i].age += delta; if (lasers[i].age > 0.08) { scene.remove(lasers[i].mesh); lasers.splice(i, 1); } }
