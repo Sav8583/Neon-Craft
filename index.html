@@ -8,9 +8,39 @@
         :root { --neon-cyan: #00ffff; --neon-pink: #ff00ff; --neon-green: #39ff14; --neon-red: #ff0000; --bg-color: #050508; }
         * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none; }
         body { margin: 0; overflow: hidden; background-color: var(--bg-color); font-family: 'Courier New', Courier, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        
         #game-container { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg-color); box-shadow: 0 0 20px var(--neon-cyan); }
         @media (min-width: 1024px) { #game-container { height: 56.25vw; max-height: 100vh; max-width: 177.78vh; } }
         
+        /* THIS KEEPS THE 3D GAME ON TOP OF THE SUN, BUT BEHIND THE UI */
+        canvas { position: absolute; top: 0; left: 0; z-index: 5; }
+
+        /* --- THE MAGIC CSS SUN --- */
+        .rainbow-circle {
+            position: absolute;
+            top: 25%;
+            left: 50%;
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            /* Added tons of extra colors to the gradient! */
+            background: linear-gradient(45deg, #ff0000, #ff7f00, #ffff00, #39ff14, #00ffff, #0000ff, #8b00ff, #ff00ff, #ff0055);
+            background-size: 400% 400%;
+            animation: rainbowMove 6s linear infinite;
+            filter: blur(8px);
+            box-shadow: 0 0 80px rgba(255, 255, 255, 0.6), 0 0 120px rgba(0, 255, 255, 0.4);
+            z-index: 2; /* Sits completely behind the 3D world */
+            pointer-events: none;
+        }
+
+        @keyframes rainbowMove {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        /* -------------------------- */
+
         .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(5, 5, 8, 0.95); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 100; }
         .title { font-size: 3rem; margin-bottom: 10px; font-weight: bold; color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan); text-align: center; text-transform: uppercase; letter-spacing: 5px; }
         .auth-box { background: rgba(0, 255, 255, 0.05); border: 2px solid var(--neon-cyan); padding: 30px; border-radius: 10px; box-shadow: 0 0 15px rgba(0,255,255,0.2); display: flex; flex-direction: column; gap: 15px; width: 300px; pointer-events: auto; }
@@ -56,6 +86,8 @@
     <div id="rotate-warning"><div>📱</div><p>Please rotate horizontally to play.</p></div>
 
     <div id="game-container">
+        <div class="rainbow-circle" id="sky-sun" style="display: none;"></div>
+
         <div id="auth-screen" class="overlay">
             <div class="title">Neon Craft <br><span style="font-size: 1.5rem; color: #39ff14">Online</span></div>
             <div class="auth-box">
@@ -136,8 +168,7 @@
         firebase.initializeApp(firebaseConfig); const auth = firebase.auth(); const db = firebase.firestore();
         let currentUser = "Guest", highScore = 0, currentScore = 0, selectedMode = 'single';
         
-        let maxHP = 20, currentHP = 20; // FIX: Increased HP to 20
-        let rainbowOrbMaterial; 
+        let maxHP = 20, currentHP = 20; 
 
         auth.onAuthStateChanged((user) => { if (user) fetchCloudScore(user.email.split('@')[0]); });
 
@@ -205,19 +236,6 @@
 
         const container = document.getElementById('game-container'); 
 
-        // FIX: The Magic Gradient Orb Generator!
-        function createGlowingOrbTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512;
-            const context = canvas.getContext('2d');
-            const gradient = context.createRadialGradient(256, 256, 0, 256, 256, 256);
-            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');      // Hot white center
-            gradient.addColorStop(0.2, 'rgba(255, 255, 0, 0.8)');    // Yellow ring
-            gradient.addColorStop(0.5, 'rgba(173, 255, 47, 0.5)');   // Greenish fade
-            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');            // Transparent edge
-            context.fillStyle = gradient; context.fillRect(0, 0, 512, 512);
-            return new THREE.CanvasTexture(canvas);
-        }
-
         function selectColor(index, color) {
             selectedColor = color; let slots = document.querySelectorAll('.slot');
             slots.forEach(s => s.classList.remove('active')); slots[index].classList.add('active');
@@ -233,6 +251,10 @@
             document.getElementById('menu').style.display = 'none'; document.getElementById('crosshair').style.display = 'block';
             document.getElementById('hud').style.display = 'block'; document.getElementById('fullscreen-btn').style.display = 'block';
             document.getElementById('quit-btn').style.display = 'block'; document.getElementById('hotbar').style.display = 'flex';
+            
+            // Turn on the CSS Sun!
+            document.getElementById('sky-sun').style.display = 'block';
+
             currentScore = 0; document.getElementById('score-board').innerText = "SCORE: 0";
             currentHP = maxHP; updateHPDisplay(); 
 
@@ -244,19 +266,18 @@
         }
 
         function initEngine() {
-            scene = new THREE.Scene(); scene.background = new THREE.Color(0x050508); scene.fog = new THREE.Fog(0x050508, 15, 60); 
+            scene = new THREE.Scene(); 
+            // We removed the solid black background here so the CSS sun shows through!
+            scene.fog = new THREE.Fog(0x050508, 15, 60); 
+            
             camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 100);
             camera.rotation.order = 'YXZ'; camera.position.y = 2; scene.add(camera);
-            renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(container.clientWidth, container.clientHeight);
+            
+            // Added alpha: true to make the canvas transparent!
+            renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true }); 
+            renderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(renderer.domElement); raycaster = new THREE.Raycaster();
             window.addEventListener('resize', () => { camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); });
-            
-            // FIX: Draw the beautiful glowing orb in the sky!
-            rainbowOrbMaterial = new THREE.SpriteMaterial({ map: createGlowingOrbTexture(), color: 0xffffff, blending: THREE.AdditiveBlending, transparent: true });
-            const skyOrb = new THREE.Sprite(rainbowOrbMaterial);
-            skyOrb.scale.set(150, 150, 1); 
-            skyOrb.position.set(0, 40, -100); // Up high and far away
-            scene.add(skyOrb);
         }
 
         function setupMultiplayer() {
@@ -308,7 +329,7 @@
             if (currentHP <= 0) respawnPlayer();
         }
 
-        // FIX: Replaced alert() with a cool text overlay so it doesn't break fullscreen!
+        // NO MORE ALERT BOX! Cool text overlay instead.
         function respawnPlayer() {
             const deathMsg = document.createElement('div');
             deathMsg.innerText = "DEFEATED!";
@@ -371,12 +392,11 @@
                 mob.userData.animTime += delta * 12; 
                 const swing = Math.sin(mob.userData.animTime) * 0.8; mob.userData.legL.rotation.x = swing; mob.userData.legR.rotation.x = -swing; mob.userData.armL.rotation.x = -swing; mob.userData.armR.rotation.x = swing; 
                 
-                // FIX: Single-player Block Collision (bounce them back if they walk into walls!)
+                // Single-player Block Collision 
                 let hitBlock = false;
                 for(let b of builtBlocks) { if(Math.abs(mob.position.x - b.position.x) < 2.5 && Math.abs(mob.position.z - b.position.z) < 2.5 && Math.abs(mob.position.y - b.position.y) < 3) hitBlock = true; }
                 if(hitBlock) mob.position.copy(oldPos);
 
-                // FIX: Single-player 3D Distance check
                 if (Math.hypot(camera.position.x - mob.position.x, camera.position.y - mob.position.y, camera.position.z - mob.position.z) < 2) { 
                     playerTakeDamage();
                     scene.remove(mob); mobs.splice(i, 1); 
@@ -412,13 +432,9 @@
             if (deviceType === 'pc' && controls && controls.isLocked) { controls.moveRight(velocity.x * delta); controls.moveForward(-velocity.z * delta); } else if (deviceType === 'mobile') { const vec = new THREE.Vector3(velocity.x * delta, 0, velocity.z * delta); vec.applyEuler(new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')); camera.position.add(vec); }
             let currentFloorLevel = getFloorHeight(); camera.position.y += velocity.y * delta; if (camera.position.y < currentFloorLevel) { velocity.y = 0; camera.position.y = currentFloorLevel; canJump = true; }
 
-            // FIX: Keep the 3D position accurate!
             if (selectedMode === 'multi' && socket) socket.emit('playerMovement', { x: camera.position.x, y: camera.position.y, z: camera.position.z, rx: camera.rotation.x, ry: camera.rotation.y });
             updateInfiniteFloor(); 
             if (selectedMode === 'single') updateMobs(delta);
-
-            // FIX: Animate the Rainbow Orb Colors perfectly!
-            if(rainbowOrbMaterial) rainbowOrbMaterial.color.setHSL((time * 0.0001) % 1.0, 1.0, 0.5);
 
             for (let i = lasers.length - 1; i >= 0; i--) { lasers[i].age += delta; if (lasers[i].age > 0.08) { scene.remove(lasers[i].mesh); lasers.splice(i, 1); } }
             for (let i = deathEffects.length - 1; i >= 0; i--) { deathEffects[i].age += delta; deathEffects[i].mesh.scale.addScalar(delta * 10); deathEffects[i].mesh.material.opacity -= delta * 2; if (deathEffects[i].mesh.material.opacity <= 0) { scene.remove(deathEffects[i].mesh); deathEffects.splice(i, 1); } }
