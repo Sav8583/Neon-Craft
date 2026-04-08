@@ -1,4 +1,4 @@
-<<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -93,6 +93,7 @@
         <div id="hud">
             <div class="user-label">USER: <span id="hud-user"></span></div>
             <div class="mode-label" id="hud-mode">MODE: Single</div>
+            <div style="color: #ff0055 !important;">💚 HP: <span id="hp-display">5/5</span></div>
             <div id="score-board">SCORE: 0</div>
             <div id="highscore-board">HIGH: 0</div>
         </div>
@@ -134,6 +135,10 @@
         };
         firebase.initializeApp(firebaseConfig); const auth = firebase.auth(); const db = firebase.firestore();
         let currentUser = "Guest", highScore = 0, currentScore = 0, selectedMode = 'single';
+        
+        // NEW HEALTH & VISUALS VARIABLES
+        let maxHP = 5, currentHP = 5;
+        let rainbowOrbMaterial; // For changing the sky orb color
 
         auth.onAuthStateChanged((user) => { if (user) fetchCloudScore(user.email.split('@')[0]); });
 
@@ -196,21 +201,16 @@
         
         const mobs = [], floorTiles = [], lasers = [], deathEffects = [], orbs = [];
         const otherPlayers = {}, serverMobs = {}; 
-        
-        // BUILDING VARIABLES
         const builtBlocks = []; 
         let selectedColor = 0x00ffff; const colorList = [0x00ffff, 0xff00ff, 0x39ff14, 0xffff00, 0xff0000];
-
-                // WEAPONS
         let currentWeapon = 0; // 0 = SMG, 1 = Shotgun
         let singlePlayerMobTimer, leftGun, rightGun;
         const TILE_SIZE = 4, GRID_SIZE = 20; 
 
-        const container = document.getElementById('game-container'); // <--- PASTE THIS LINE HERE!
+        const container = document.getElementById('game-container'); // FIX: Added this crucial missing line
 
         function selectColor(index, color) {
             selectedColor = color; let slots = document.querySelectorAll('.slot');
-
             slots.forEach(s => s.classList.remove('active')); slots[index].classList.add('active');
         }
 
@@ -225,7 +225,8 @@
             document.getElementById('hud').style.display = 'block'; document.getElementById('fullscreen-btn').style.display = 'block';
             document.getElementById('quit-btn').style.display = 'block'; document.getElementById('hotbar').style.display = 'flex';
             currentScore = 0; document.getElementById('score-board').innerText = "SCORE: 0";
-            
+            currentHP = maxHP; updateHPDisplay(); // Reset health on game start
+
             toggleFullScreen(); initEngine(); createGuns(); generateInfiniteFloor();
             
             if (selectedMode === 'multi') setupMultiplayer(); else singlePlayerMobTimer = setInterval(spawnHumanoidMob, 2500); 
@@ -234,12 +235,19 @@
         }
 
         function initEngine() {
-            scene = new THREE.Scene(); scene.background = new THREE.Color(0x050508); scene.fog = new THREE.Fog(0x050508, 15, 50); 
+            scene = new THREE.Scene(); scene.background = new THREE.Color(0x050508); scene.fog = new THREE.Fog(0x050508, 15, 60); 
             camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 100);
             camera.rotation.order = 'YXZ'; camera.position.y = 2; scene.add(camera);
             renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.setSize(container.clientWidth, container.clientHeight);
             container.appendChild(renderer.domElement); raycaster = new THREE.Raycaster();
             window.addEventListener('resize', () => { camera.aspect = container.clientWidth / container.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(container.clientWidth, container.clientHeight); });
+            
+            // --- ADD RAINBOW SKYSYHERE ---
+            rainbowOrbMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true });
+            const geo = new THREE.SphereGeometry(25, 12, 12);
+            const skyOrb = new THREE.Mesh(geo, rainbowOrbMaterial);
+            skyOrb.position.set(0, -20, -50); // Position it in the sky void
+            scene.add(skyOrb);
         }
 
         function setupMultiplayer() {
@@ -258,12 +266,12 @@
             });
             socket.on('playerDisconnected', (id) => { if (otherPlayers[id]) { scene.remove(otherPlayers[id]); delete otherPlayers[id]; } });
 
-            // BLOCKS
+            // Listen to hurt events from the serverReferee
+            socket.on('playerHurt', () => { playerTakeDamage(); });
+
             socket.on('initBlocks', (blocks) => { blocks.forEach(b => buildPhysicalBlock(b)); });
             socket.on('blockPlaced', (data) => { buildPhysicalBlock(data); });
             socket.on('blockBroken', (id) => { removePhysicalBlock(id); });
-
-            // MOBS
             socket.on('mobSpawned', (mobData) => { addServerMob(mobData); });
             socket.on('currentMobs', (mobsData) => { for(let id in mobsData) addServerMob(mobsData[id]); });
             socket.on('mobsUpdate', (mobsData) => {
@@ -276,8 +284,6 @@
                 }
             });
             socket.on('mobDied', (mobId) => { killServerMob(mobId); });
-
-            // OTHER PLAYER LASERS
             socket.on('otherPlayerShoot', (data) => {
                 let p = otherPlayers[data.playerId]; if(!p) return;
                 let dummy = new THREE.Object3D(); dummy.position.copy(p.position); dummy.position.y += 1.2; dummy.rotation.set(data.rot.x, data.rot.y, data.rot.z, 'YXZ');
@@ -285,69 +291,50 @@
             });
         }
 
+        // ================= HEALTH & RESPAWN SYSTEM =================
+        function updateHPDisplay() {
+            document.getElementById('hp-display').innerText = currentHP + "/" + maxHP;
+        }
+
+        function playerTakeDamage() {
+            currentHP--;
+            updateHPDisplay();
+            
+            // Visual feedback (hurt overlay)
+            const flash = document.createElement('div'); flash.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.3);z-index:99;pointer-events:none;";
+            container.appendChild(flash); setTimeout(() => flash.remove(), 100);
+
+            if (currentHP <= 0) respawnPlayer();
+        }
+
+        function respawnPlayer() {
+            alert("⚠️ DEFEATED! Back to spawn...");
+            camera.position.set(0, 2.0, 0); camera.rotation.set(0,0,0); // Back to origin
+            velocity.set(0,0,0);
+            currentScore = 0; document.getElementById('score-board').innerText = "SCORE: 0"; // Lose score on death? Yes!
+            currentHP = maxHP; updateHPDisplay(); // Refill health
+        }
+
         // ================= BUILD & DESTROY SYSTEM =================
         function buildPhysicalBlock(data) {
-            let existing = builtBlocks.find(b => b.userData.id === data.id); if(existing) return; // Prevent duplicates
+            let existing = builtBlocks.find(b => b.userData.id === data.id); if(existing) return; 
             const geo = new THREE.BoxGeometry(4, 4, 4); const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x001111 })); 
             const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: data.color, wireframe: true }));
             mesh.add(wire); mesh.position.set(data.x, data.y, data.z); mesh.userData = { isBlock: true, id: data.id };
             scene.add(mesh); builtBlocks.push(mesh);
         }
 
-        function removePhysicalBlock(id) {
-            let index = builtBlocks.findIndex(b => b.userData.id === id);
-            if (index !== -1) { scene.remove(builtBlocks[index]); builtBlocks.splice(index, 1); }
-        }
-
-        function attemptBuild() {
-            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-            const targets = [...floorTiles, ...builtBlocks]; const intersects = raycaster.intersectObjects(targets, true);
-            if (intersects.length > 0) {
-                let inter = intersects[0];
-                let pt = inter.point.clone().add(inter.face.normal.clone().multiplyScalar(0.1)); // FIX: Small offset prevents math errors
-                
-                // FIX: Perfect snap-to-grid math!
-                let bx = Math.round(pt.x / 4) * 4;
-                let by = Math.floor(pt.y / 4) * 4 + 2; 
-                let bz = Math.round(pt.z / 4) * 4;
-
-                if (Math.abs(camera.position.x - bx) < 2 && Math.abs(camera.position.z - bz) < 2 && Math.abs(camera.position.y - by) < 3) return;
-                
-                const blockId = bx + "_" + by + "_" + bz;
-                const blockData = { id: blockId, x: bx, y: by, z: bz, color: selectedColor };
-                if (socket && selectedMode === 'multi') socket.emit('placeBlock', blockData);
-                else buildPhysicalBlock(blockData); 
-            }
-        }
-
-        function attemptDestroy() {
-            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-            const intersects = raycaster.intersectObjects(builtBlocks, true);
-            if (intersects.length > 0) {
-                let hitObj = intersects[0].object; while (hitObj.parent && !hitObj.userData.isBlock) hitObj = hitObj.parent;
-                if (hitObj.userData.isBlock) {
-                    let id = hitObj.userData.id;
-                    if (socket && selectedMode === 'multi') socket.emit('breakBlock', id);
-                    else removePhysicalBlock(id);
-                }
-            }
-        }
-
-        function getFloorHeight() {
-            let maxFloor = 2.0; 
-            builtBlocks.forEach(b => {
-                let dx = Math.abs(camera.position.x - b.position.x); let dz = Math.abs(camera.position.z - b.position.z);
-                if (dx < 2.2 && dz < 2.2) { let surfaceY = b.position.y + 4.0; if (surfaceY > maxFloor && camera.position.y >= surfaceY - 2.5) maxFloor = surfaceY; }
-            }); return maxFloor;
-        }
+        function removePhysicalBlock(id) { let index = builtBlocks.findIndex(b => b.userData.id === id); if (index !== -1) { scene.remove(builtBlocks[index]); builtBlocks.splice(index, 1); } }
+        function attemptBuild() { raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); const targets = [...floorTiles, ...builtBlocks]; const intersects = raycaster.intersectObjects(targets, true); if (intersects.length > 0) { let inter = intersects[0]; let pt = inter.point.clone().add(inter.face.normal.clone().multiplyScalar(0.1)); let bx = Math.round(pt.x / 4) * 4; let by = Math.floor(pt.y / 4) * 4 + 2; let bz = Math.round(pt.z / 4) * 4; if (Math.abs(camera.position.x - bx) < 2 && Math.abs(camera.position.z - bz) < 2 && Math.abs(camera.position.y - by) < 3) return; const blockId = bx + "_" + by + "_" + bz; const blockData = { id: blockId, x: bx, y: by, z: bz, color: selectedColor }; if (socket && selectedMode === 'multi') socket.emit('placeBlock', blockData); else buildPhysicalBlock(blockData); } }
+        function attemptDestroy() { raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); const intersects = raycaster.intersectObjects(builtBlocks, true); if (intersects.length > 0) { let hitObj = intersects[0].object; while (hitObj.parent && !hitObj.userData.isBlock) hitObj = hitObj.parent; if (hitObj.userData.isBlock) { let id = hitObj.userData.id; if (socket && selectedMode === 'multi') socket.emit('breakBlock', id); else removePhysicalBlock(id); } } }
+        function getFloorHeight() { let maxFloor = 2.0; builtBlocks.forEach(b => { let dx = Math.abs(camera.position.x - b.position.x); let dz = Math.abs(camera.position.z - b.position.z); if (dx < 2.2 && dz < 2.2) { let surfaceY = b.position.y + 4.0; if (surfaceY > maxFloor && camera.position.y >= surfaceY - 2.5) maxFloor = surfaceY; } }); return maxFloor; }
 
         // ================= HUMAN BUILDERS =================
         function addOtherPlayer(id, pos) {
             const playerGroup = new THREE.Group(); const bodyGroup = new THREE.Group(); bodyGroup.position.y = -2;
             const matWire = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true }); const matSolid = new THREE.MeshBasicMaterial({ color: 0x001111 }); const matEye = new THREE.MeshBasicMaterial({ color: 0xffffff });
             const buildPart = (w, h, d, yPos) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); const w2 = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); m.add(w2); m.position.y = yPos; return m; };
-            const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); 
-            const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR);
+            const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR);
             const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75));
             const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9));
             bodyGroup.add(head); bodyGroup.add(body); bodyGroup.add(armL); bodyGroup.add(armR); bodyGroup.add(legL); bodyGroup.add(legR); playerGroup.add(bodyGroup);
@@ -360,190 +347,40 @@
             const mobGroup = new THREE.Group(); mobGroup.userData = { isServerMob: true, id: data.id, animTime: 0 };
             const matWire = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); const matSolid = new THREE.MeshBasicMaterial({ color: 0x110011 }); const matEye = new THREE.MeshBasicMaterial({ color: 0xff0000 });
             const buildPart = (w, h, d, yPos) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); const w2 = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); m.add(w2); m.position.y = yPos; return m; };
-            const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); 
-            const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR);
+            const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR);
             const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75));
             const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9));
             mobGroup.add(head); mobGroup.add(body); mobGroup.add(armL); mobGroup.add(armR); mobGroup.add(legL); mobGroup.add(legR);
-            mobGroup.userData.armL = armL; mobGroup.userData.armR = armR; mobGroup.userData.legL = legL; mobGroup.userData.legR = legR;
-            mobGroup.position.set(data.x, data.y, data.z); scene.add(mobGroup); serverMobs[data.id] = mobGroup;
+            mobGroup.userData.armL = armL; mobGroup.userData.armR = armR; mobGroup.userData.legL = legL; mobGroup.userData.legR = legR; mobGroup.position.set(data.x, data.y, data.z); scene.add(mobGroup); serverMobs[data.id] = mobGroup;
         }
 
-        function killServerMob(mobId) {
-            if (serverMobs[mobId]) {
-                const hitObj = serverMobs[mobId]; const blast = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true, transparent: true, opacity: 1 }));
-                blast.position.copy(hitObj.position); blast.position.y += 1.2; scene.add(blast); deathEffects.push({ mesh: blast, age: 0 }); dropOrbs(hitObj.position); scene.remove(hitObj); delete serverMobs[mobId];
-            }
-        }
-
-        function spawnHumanoidMob() {
-            if (mobs.length > 15) return; 
-            const mobGroup = new THREE.Group(); mobGroup.userData = { isMob: true, speed: 5 + Math.random() * 4, animTime: Math.random() * 10 };
-            const matWire = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); const matSolid = new THREE.MeshBasicMaterial({ color: 0x110011 }); const matEye = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const buildPart = (w, h, d, yPos) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); const w2 = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); m.add(w2); m.position.y = yPos; return m; };
-            const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); 
-            const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR);
-            const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75));
-            const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9));
-            mobGroup.add(head); mobGroup.add(body); mobGroup.add(armL); mobGroup.add(armR); mobGroup.add(legL); mobGroup.add(legR);
-            mobGroup.userData.armL = armL; mobGroup.userData.armR = armR; mobGroup.userData.legL = legL; mobGroup.userData.legR = legR;
-            const angle = Math.random() * Math.PI * 2, dist = 25 + Math.random() * 15;
-            mobGroup.position.set(camera.position.x + Math.cos(angle) * dist, 0.5, camera.position.z + Math.sin(angle) * dist); scene.add(mobGroup); mobs.push(mobGroup);
-        }
-
-        function updateMobs(delta) {
-            for (let i = mobs.length - 1; i >= 0; i--) {
-                const mob = mobs[i]; mob.lookAt(camera.position.x, mob.position.y, camera.position.z); mob.translateZ(mob.userData.speed * delta); mob.userData.animTime += delta * 12;
-                const swing = Math.sin(mob.userData.animTime) * 0.8; mob.userData.legL.rotation.x = swing; mob.userData.legR.rotation.x = -swing; mob.userData.armL.rotation.x = -swing; mob.userData.armR.rotation.x = swing;
-                if (mob.position.distanceTo(camera.position) < 2) { scene.remove(mob); mobs.splice(i, 1); }
-            }
+        function killServerMob(mobId) { if (serverMobs[mobId]) { const hitObj = serverMobs[mobId]; const blast = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true, transparent: true, opacity: 1 })); blast.position.copy(hitObj.position); blast.position.y += 1.2; scene.add(blast); deathEffects.push({ mesh: blast, age: 0 }); dropOrbs(hitObj.position); scene.remove(hitObj); delete serverMobs[mobId]; } }
+        function spawnHumanoidMob() { if (mobs.length > 15) return; const mobGroup = new THREE.Group(); mobGroup.userData = { isMob: true, speed: 5 + Math.random() * 4, animTime: Math.random() * 10 }; const matWire = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); const matSolid = new THREE.MeshBasicMaterial({ color: 0x110011 }); const matEye = new THREE.MeshBasicMaterial({ color: 0xff0000 }); const buildPart = (w, h, d, yPos) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matSolid); const w2 = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matWire); m.add(w2); m.position.y = yPos; return m; }; const head = buildPart(0.6, 0.6, 0.6, 3.2); const body = buildPart(0.6, 2.0, 0.4, 1.9); const eyeL = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeL.position.set(-0.15, 0.1, -0.31); const eyeR = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), matEye); eyeR.position.set(0.15, 0.1, -0.31); head.add(eyeL); head.add(eyeR); const armL = new THREE.Group(); armL.position.set(-0.5, 2.8, 0); armL.add(buildPart(0.2, 1.5, 0.2, -0.75)); const armR = new THREE.Group(); armR.position.set(0.5, 2.8, 0); armR.add(buildPart(0.2, 1.5, 0.2, -0.75)); const legL = new THREE.Group(); legL.position.set(-0.2, 0.9, 0); legL.add(buildPart(0.25, 1.8, 0.25, -0.9)); const legR = new THREE.Group(); legR.position.set(0.2, 0.9, 0); legR.add(buildPart(0.25, 1.8, 0.25, -0.9)); mobGroup.add(head); mobGroup.add(body); mobGroup.add(armL); mobGroup.add(armR); mobGroup.add(legL); mobGroup.add(legR); mobGroup.userData.armL = armL; mobGroup.userData.armR = armR; mobGroup.userData.legL = legL; mobGroup.userData.legR = legR; const angle = Math.random() * Math.PI * 2, dist = 25 + Math.random() * 15; mobGroup.position.set(camera.position.x + Math.cos(angle) * dist, 0.5, camera.position.z + Math.sin(angle) * dist); scene.add(mobGroup); mobs.push(mobGroup); }
+        function updateMobs(delta) { 
+            for (let i = mobs.length - 1; i >= 0; i--) { 
+                const mob = mobs[i]; mob.lookAt(camera.position.x, mob.position.y, camera.position.z); mob.translateZ(mob.userData.speed * delta); mob.userData.animTime += delta * 12; const swing = Math.sin(mob.userData.animTime) * 0.8; mob.userData.legL.rotation.x = swing; mob.userData.legR.rotation.x = -swing; mob.userData.armL.rotation.x = -swing; mob.userData.armR.rotation.x = swing; 
+                // SINGLE PLAYER: Deals damage on touch, then disappears
+                if (mob.position.distanceTo(camera.position) < 2) { 
+                    playerTakeDamage();
+                    scene.remove(mob); mobs.splice(i, 1); 
+                } 
+            } 
         }
 
         // ================= WEAPONS & SHOOTING =================
-        function createGuns() {
-            const createGun = (color) => {
-                const group = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.5), new THREE.MeshBasicMaterial({color: color, wireframe: true}));
-                const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.3), new THREE.MeshBasicMaterial({color: 0xffffff, wireframe: true})); barrel.position.set(0, 0.05, -0.3);
-                group.add(body); group.add(barrel); return group;
-            };
-            leftGun = createGun(0x00ffff); leftGun.position.set(-0.35, -0.3, -0.6); rightGun = createGun(0xff00ff); rightGun.position.set(0.35, -0.3, -0.6); camera.add(leftGun); camera.add(rightGun);
-        }
-
-        function fireVisualLaser(originObj, colorHex) {
-            const mat = new THREE.MeshBasicMaterial({ color: colorHex });
-            const laser = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 50).rotateX(Math.PI / 2), mat); 
-            laser.position.copy(originObj.position); laser.quaternion.copy(originObj.quaternion); laser.translateZ(-25); 
-            scene.add(laser); lasers.push({ mesh: laser, age: 0 });
-        }
-
-        function shoot() {
-            leftGun.position.z = -0.4; leftGun.rotation.x = 0.2; rightGun.position.z = -0.4; rightGun.rotation.x = 0.2;
-            
-            let colorHex = currentWeapon === 0 ? 0x00ffff : 0xff0000;
-
-            if (currentWeapon === 0) { // SMG (1 bullet)
-                fireVisualLaser(camera, colorHex);
-                if (socket && selectedMode === 'multi') socket.emit('playerShoot', { rot: {x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z}, color: colorHex });
-            } else { // SHOTGUN (3 bullets, slight spread)
-                let spread = [-0.1, 0, 0.1];
-                spread.forEach(offset => {
-                    let dummy = new THREE.Object3D(); dummy.position.copy(camera.position); dummy.quaternion.copy(camera.quaternion); dummy.rotateY(offset);
-                    fireVisualLaser(dummy, colorHex);
-                    if (socket && selectedMode === 'multi') socket.emit('playerShoot', { rot: {x: dummy.rotation.x, y: dummy.rotation.y, z: dummy.rotation.z}, color: colorHex });
-                });
-            }
-
-            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-            if (selectedMode === 'single') {
-                const intersects = raycaster.intersectObjects(mobs, true);
-                if (intersects.length > 0) {
-                    let hitObj = intersects[0].object; while (hitObj.parent && !hitObj.userData.isMob) hitObj = hitObj.parent;
-                    if (hitObj.userData.isMob) { 
-                        const blast = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true, transparent: true, opacity: 1 }));
-                        blast.position.copy(hitObj.position); blast.position.y += 1.2; scene.add(blast); deathEffects.push({ mesh: blast, age: 0 });
-                        dropOrbs(hitObj.position); scene.remove(hitObj); mobs.splice(mobs.indexOf(hitObj), 1); addScore(100); 
-                    }
-                }
-            } else {
-                const sMobsArray = Object.values(serverMobs);
-                const intersects = raycaster.intersectObjects(sMobsArray, true);
-                if (intersects.length > 0) {
-                    let hitObj = intersects[0].object; while (hitObj.parent && !hitObj.userData.isServerMob) hitObj = hitObj.parent;
-                    if (hitObj.userData.isServerMob) { socket.emit('mobKilled', hitObj.userData.id); addScore(100); }
-                }
-            }
-        }
+        function createGuns() { const createGun = (color) => { const group = new THREE.Group(); const body = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.5), new THREE.MeshBasicMaterial({color: color, wireframe: true})); const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.3), new THREE.MeshBasicMaterial({color: 0xffffff, wireframe: true})); barrel.position.set(0, 0.05, -0.3); group.add(body); group.add(barrel); return group; }; leftGun = createGun(0x00ffff); leftGun.position.set(-0.35, -0.3, -0.6); rightGun = createGun(0xff00ff); rightGun.position.set(0.35, -0.3, -0.6); camera.add(leftGun); camera.add(rightGun); }
+        function fireVisualLaser(originObj, colorHex) { const mat = new THREE.MeshBasicMaterial({ color: colorHex }); const laser = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 50).rotateX(Math.PI / 2), mat); laser.position.copy(originObj.position); laser.quaternion.copy(originObj.quaternion); laser.translateZ(-25); scene.add(laser); lasers.push({ mesh: laser, age: 0 }); }
+        function shoot() { leftGun.position.z = -0.4; leftGun.rotation.x = 0.2; rightGun.position.z = -0.4; rightGun.rotation.x = 0.2; let colorHex = currentWeapon === 0 ? 0x00ffff : 0xff0000; if (currentWeapon === 0) { fireVisualLaser(camera, colorHex); if (socket && selectedMode === 'multi') socket.emit('playerShoot', { rot: {x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z}, color: colorHex }); } else { let spread = [-0.1, 0, 0.1]; spread.forEach(offset => { let dummy = new THREE.Object3D(); dummy.position.copy(camera.position); dummy.quaternion.copy(camera.quaternion); dummy.rotateY(offset); fireVisualLaser(dummy, colorHex); if (socket && selectedMode === 'multi') socket.emit('playerShoot', { rot: {x: dummy.rotation.x, y: dummy.rotation.y, z: dummy.rotation.z}, color: colorHex }); }); } raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); if (selectedMode === 'single') { const intersects = raycaster.intersectObjects(mobs, true); if (intersects.length > 0) { let hitObj = intersects[0].object; while (hitObj.parent && !hitObj.userData.isMob) hitObj = hitObj.parent; if (hitObj.userData.isMob) { const blast = new THREE.Mesh(new THREE.IcosahedronGeometry(1.2, 1), new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true, transparent: true, opacity: 1 })); blast.position.copy(hitObj.position); blast.position.y += 1.2; scene.add(blast); deathEffects.push({ mesh: blast, age: 0 }); dropOrbs(hitObj.position); scene.remove(hitObj); mobs.splice(mobs.indexOf(hitObj), 1); addScore(100); } } } else { const sMobsArray = Object.values(serverMobs); const intersects = raycaster.intersectObjects(sMobsArray, true); if (intersects.length > 0) { let hitObj = intersects[0].object; while (hitObj.parent && !hitObj.userData.isServerMob) hitObj = hitObj.parent; if (hitObj.userData.isServerMob) { socket.emit('mobKilled', hitObj.userData.id); addScore(100); } } } }
 
         // ================= ENVIRONMENT =================
-        function generateInfiniteFloor() {
-            const geoFloor = new THREE.BoxGeometry(TILE_SIZE, 0.5, TILE_SIZE); 
-            for (let x = -GRID_SIZE/2; x < GRID_SIZE/2; x++) {
-                for (let z = -GRID_SIZE/2; z < GRID_SIZE/2; z++) {
-                    const solid = new THREE.Mesh(geoFloor, new THREE.MeshBasicMaterial({ color: 0x001111 })); const wire = new THREE.Mesh(geoFloor, new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true })); solid.add(wire); 
-                    solid.position.set(x * TILE_SIZE, 0, z * TILE_SIZE); scene.add(solid); floorTiles.push(solid);
-                }
-            }
-        }
-
-        function updateInfiniteFloor() {
-            const halfGrid = (GRID_SIZE / 2) * TILE_SIZE;
-            floorTiles.forEach(tile => {
-                let wrapped = false;
-                if (camera.position.z < tile.position.z - halfGrid) { tile.position.z -= halfGrid * 2; wrapped = true; }
-                if (camera.position.z > tile.position.z + halfGrid) { tile.position.z += halfGrid * 2; wrapped = true; }
-                if (camera.position.x < tile.position.x - halfGrid) { tile.position.x -= halfGrid * 2; wrapped = true; }
-                if (camera.position.x > tile.position.x + halfGrid) { tile.position.x += halfGrid * 2; wrapped = true; }
-            });
-        }
-
-        function dropOrbs(pos) {
-            for(let i=0; i<4; i++) {
-                const orb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 })); orb.position.copy(pos); orb.position.y += 1; scene.add(orb);
-                orbs.push({ mesh: orb, age: 0, vx: (Math.random() - 0.5) * 15, vy: 5 + Math.random() * 8, vz: (Math.random() - 0.5) * 15 });
-            }
-        }
+        function generateInfiniteFloor() { const geoFloor = new THREE.BoxGeometry(TILE_SIZE, 0.5, TILE_SIZE); for (let x = -GRID_SIZE/2; x < GRID_SIZE/2; x++) { for (let z = -GRID_SIZE/2; z < GRID_SIZE/2; z++) { const solid = new THREE.Mesh(geoFloor, new THREE.MeshBasicMaterial({ color: 0x001111 })); const wire = new THREE.Mesh(geoFloor, new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true })); solid.add(wire); solid.position.set(x * TILE_SIZE, 0, z * TILE_SIZE); scene.add(solid); floorTiles.push(solid); } } }
+        function updateInfiniteFloor() { const halfGrid = (GRID_SIZE / 2) * TILE_SIZE; floorTiles.forEach(tile => { let wrapped = false; if (camera.position.z < tile.position.z - halfGrid) { tile.position.z -= halfGrid * 2; wrapped = true; } if (camera.position.z > tile.position.z + halfGrid) { tile.position.z += halfGrid * 2; wrapped = true; } if (camera.position.x < tile.position.x - halfGrid) { tile.position.x -= halfGrid * 2; wrapped = true; } if (camera.position.x > tile.position.x + halfGrid) { tile.position.x += halfGrid * 2; wrapped = true; } }); }
+        function dropOrbs(pos) { for(let i=0; i<4; i++) { const orb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 })); orb.position.copy(pos); orb.position.y += 1; scene.add(orb); orbs.push({ mesh: orb, age: 0, vx: (Math.random() - 0.5) * 15, vy: 5 + Math.random() * 8, vz: (Math.random() - 0.5) * 15 }); } }
 
         // ================= CONTROLS =================
         function triggerJump() { if (canJump) { velocity.y += 20.0; canJump = false; } }
-
-        function setupPCControls() {
-            controls = new THREE.PointerLockControls(camera, container);
-            container.addEventListener('click', (e) => { if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && !e.target.classList.contains('slot') && e.target.id !== 'weapon-btn') controls.lock(); });
-            document.addEventListener('keydown', (e) => {
-                if(e.code === 'KeyW') moveForward = true; if(e.code === 'KeyA') moveLeft = true; if(e.code === 'KeyS') moveBackward = true; if(e.code === 'KeyD') moveRight = true; if(e.code === 'Space') triggerJump();
-                if(e.key >= '1' && e.key <= '5') selectColor(parseInt(e.key)-1, colorList[parseInt(e.key)-1]); 
-                if(e.code === 'KeyQ') switchWeapon(); // Q to switch weapons on PC!
-            });
-            document.addEventListener('keyup', (e) => { if(e.code === 'KeyW') moveForward = false; if(e.code === 'KeyA') moveLeft = false; if(e.code === 'KeyS') moveBackward = false; if(e.code === 'KeyD') moveRight = false; });
-            
-            // Left click = Shoot. Right click = Build. Middle click = Break
-            container.addEventListener('mousedown', (e) => { 
-                if(controls.isLocked) { if(e.button === 0) shoot(); else if(e.button === 2) attemptBuild(); else if(e.button === 1) attemptDestroy(); } 
-            });
-            container.addEventListener('contextmenu', e => e.preventDefault());
-        }
-
-        function setupMobileControls() {
-            const jZone = document.getElementById('joystick-zone'); const jStick = document.getElementById('joystick-stick');
-            let jCenterX, jCenterY, joyPointerId = null;
-
-            const updateJoystick = (e) => {
-                let dx = e.clientX - jCenterX, dy = e.clientY - jCenterY, dist = Math.sqrt(dx*dx + dy*dy), max = 45;
-                if (dist > max) { dx = (dx / dist) * max; dy = (dy / dist) * max; }
-                jStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; joystickX = dx / max; joystickY = dy / max;
-            };
-
-            const resetJoystick = () => { joystickX = 0; joystickY = 0; jStick.style.transform = `translate(-50%, -50%)`; jStick.style.background = 'rgba(0, 255, 255, 0.6)'; };
-
-            jZone.addEventListener('pointerdown', (e) => { 
-                if (joyPointerId !== null) return;
-                joyPointerId = e.pointerId; jZone.setPointerCapture(e.pointerId);
-                const rect = jZone.getBoundingClientRect(); jCenterX = rect.left + rect.width / 2; jCenterY = rect.top + rect.height / 2; 
-                jStick.style.background = 'rgba(0, 255, 255, 1)'; updateJoystick(e); 
-            });
-            jZone.addEventListener('pointermove', (e) => { if (e.pointerId === joyPointerId) updateJoystick(e); });
-            const releaseJoy = (e) => { if (e.pointerId === joyPointerId) { jZone.releasePointerCapture(e.pointerId); joyPointerId = null; resetJoystick(); } };
-            jZone.addEventListener('pointerup', releaseJoy); jZone.addEventListener('pointercancel', releaseJoy);
-
-            // MOBILE BUTTONS
-            document.getElementById('fire-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); shoot(); });
-            document.getElementById('jump-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); triggerJump(); });
-            document.getElementById('build-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); attemptBuild(); });
-            document.getElementById('break-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); attemptDestroy(); }); // NEW BREAK BUTTON
-
-            const lookZone = document.getElementById('look-zone'); let lookPointerId = null, lookX = 0, lookY = 0;
-            lookZone.addEventListener('pointerdown', (e) => { 
-                if (lookPointerId !== null) return;
-                lookPointerId = e.pointerId; lookZone.setPointerCapture(e.pointerId); lookX = e.clientX; lookY = e.clientY; 
-            });
-            lookZone.addEventListener('pointermove', (e) => { 
-                if (e.pointerId === lookPointerId) {
-                    let dx = e.clientX - lookX; let dy = e.clientY - lookY; camera.rotation.y -= dx * 0.005; camera.rotation.x -= dy * 0.005; camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x)); lookX = e.clientX; lookY = e.clientY;
-                }
-            });
-            const releaseLook = (e) => { if (e.pointerId === lookPointerId) { lookZone.releasePointerCapture(e.pointerId); lookPointerId = null; } };
-            lookZone.addEventListener('pointerup', releaseLook); lookZone.addEventListener('pointercancel', releaseLook);
-        }
+        function setupPCControls() { controls = new THREE.PointerLockControls(camera, container); container.addEventListener('click', (e) => { if(e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && !e.target.classList.contains('slot') && e.target.id !== 'weapon-btn') controls.lock(); }); document.addEventListener('keydown', (e) => { if(e.code === 'KeyW') moveForward = true; if(e.code === 'KeyA') moveLeft = true; if(e.code === 'KeyS') moveBackward = true; if(e.code === 'KeyD') moveRight = true; if(e.code === 'Space') triggerJump(); if(e.key >= '1' && e.key <= '5') selectColor(parseInt(e.key)-1, colorList[parseInt(e.key)-1]); if(e.code === 'KeyQ') switchWeapon(); }); document.addEventListener('keyup', (e) => { if(e.code === 'KeyW') moveForward = false; if(e.code === 'KeyA') moveLeft = false; if(e.code === 'KeyS') moveBackward = false; if(e.code === 'KeyD') moveRight = false; }); container.addEventListener('mousedown', (e) => { if(controls.isLocked) { if(e.button === 0) shoot(); else if(e.button === 2) attemptBuild(); else if(e.button === 1) attemptDestroy(); } }); container.addEventListener('contextmenu', e => e.preventDefault()); }
+        function setupMobileControls() { const jZone = document.getElementById('joystick-zone'); const jStick = document.getElementById('joystick-stick'); let jCenterX, jCenterY, joyPointerId = null; const updateJoystick = (e) => { let dx = e.clientX - jCenterX, dy = e.clientY - jCenterY, dist = Math.sqrt(dx*dx + dy*dy), max = 45; if (dist > max) { dx = (dx / dist) * max; dy = (dy / dist) * max; } jStick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; joystickX = dx / max; joystickY = dy / max; }; const resetJoystick = () => { joystickX = 0; joystickY = 0; jStick.style.transform = `translate(-50%, -50%)`; jStick.style.background = 'rgba(0, 255, 255, 0.6)'; }; jZone.addEventListener('pointerdown', (e) => { if (joyPointerId !== null) return; joyPointerId = e.pointerId; jZone.setPointerCapture(e.pointerId); const rect = jZone.getBoundingClientRect(); jCenterX = rect.left + rect.width / 2; jCenterY = rect.top + rect.height / 2; jStick.style.background = 'rgba(0, 255, 255, 1)'; updateJoystick(e); }); jZone.addEventListener('pointermove', (e) => { if (e.pointerId === joyPointerId) updateJoystick(e); }); const releaseJoy = (e) => { if (e.pointerId === joyPointerId) { jZone.releasePointerCapture(e.pointerId); joyPointerId = null; resetJoystick(); } }; jZone.addEventListener('pointerup', releaseJoy); jZone.addEventListener('pointercancel', releaseJoy); document.getElementById('fire-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); shoot(); }); document.getElementById('jump-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); triggerJump(); }); document.getElementById('build-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); attemptBuild(); }); document.getElementById('break-btn').addEventListener('pointerdown', (e) => { e.preventDefault(); attemptDestroy(); }); const lookZone = document.getElementById('look-zone'); let lookPointerId = null, lookX = 0, lookY = 0; lookZone.addEventListener('pointerdown', (e) => { if (lookPointerId !== null) return; lookPointerId = e.pointerId; lookZone.setPointerCapture(e.pointerId); lookX = e.clientX; lookY = e.clientY; }); lookZone.addEventListener('pointermove', (e) => { if (e.pointerId === lookPointerId) { let dx = e.clientX - lookX; let dy = e.clientY - lookY; camera.rotation.y -= dx * 0.005; camera.rotation.x -= dy * 0.005; camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x)); lookX = e.clientX; lookY = e.clientY; } }); const releaseLook = (e) => { if (e.pointerId === lookPointerId) { lookZone.releasePointerCapture(e.pointerId); lookPointerId = null; } }; lookZone.addEventListener('pointerup', releaseLook); lookZone.addEventListener('pointercancel', releaseLook); }
 
         function animate() {
             requestAnimationFrame(animate);
@@ -556,35 +393,22 @@
             velocity.x -= velocity.x * 10.0 * delta; velocity.z -= velocity.z * 10.0 * delta;
             
             let inputX = 0; let inputZ = 0;
-            if (deviceType === 'pc') {
-                inputX = Number(moveRight) - Number(moveLeft); inputZ = Number(moveBackward) - Number(moveForward); 
-                if (inputX !== 0 || inputZ !== 0) { let len = Math.sqrt(inputX*inputX + inputZ*inputZ); inputX /= len; inputZ /= len; }
-            } else if (deviceType === 'mobile') { inputX = joystickX; inputZ = joystickY; }
-
+            if (deviceType === 'pc') { inputX = Number(moveRight) - Number(moveLeft); inputZ = Number(moveBackward) - Number(moveForward); if (inputX !== 0 || inputZ !== 0) { let len = Math.sqrt(inputX*inputX + inputZ*inputZ); inputX /= len; inputZ /= len; } } else if (deviceType === 'mobile') { inputX = joystickX; inputZ = joystickY; }
             velocity.x += inputX * 60.0 * delta; velocity.z += inputZ * 60.0 * delta; velocity.y -= 40.0 * delta; 
-
-            if (deviceType === 'pc' && controls && controls.isLocked) {
-                controls.moveRight(velocity.x * delta); controls.moveForward(-velocity.z * delta); 
-            } else if (deviceType === 'mobile') {
-                const vec = new THREE.Vector3(velocity.x * delta, 0, velocity.z * delta); 
-                vec.applyEuler(new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')); camera.position.add(vec);
-            }
-
-            let currentFloorLevel = getFloorHeight();
-            camera.position.y += velocity.y * delta;
-            if (camera.position.y < currentFloorLevel) { velocity.y = 0; camera.position.y = currentFloorLevel; canJump = true; }
+            if (deviceType === 'pc' && controls && controls.isLocked) { controls.moveRight(velocity.x * delta); controls.moveForward(-velocity.z * delta); } else if (deviceType === 'mobile') { const vec = new THREE.Vector3(velocity.x * delta, 0, velocity.z * delta); vec.applyEuler(new THREE.Euler(0, camera.rotation.y, 0, 'YXZ')); camera.position.add(vec); }
+            let currentFloorLevel = getFloorHeight(); camera.position.y += velocity.y * delta; if (camera.position.y < currentFloorLevel) { velocity.y = 0; camera.position.y = currentFloorLevel; canJump = true; }
 
             if (selectedMode === 'multi' && socket) socket.emit('playerMovement', { x: camera.position.x, y: camera.position.y, z: camera.position.z, rx: camera.rotation.x, ry: camera.rotation.y });
             updateInfiniteFloor(); 
             if (selectedMode === 'single') updateMobs(delta);
 
+            // --- ANIMATE RAINBOW SKY ORB ---
+            // Interpolate color based on time (rainbow effect)
+            if(rainbowOrbMaterial) rainbowOrbMaterial.color.setHSL((time * 0.0001) % 1.0, 0.9, 0.7);
+
             for (let i = lasers.length - 1; i >= 0; i--) { lasers[i].age += delta; if (lasers[i].age > 0.08) { scene.remove(lasers[i].mesh); lasers.splice(i, 1); } }
             for (let i = deathEffects.length - 1; i >= 0; i--) { deathEffects[i].age += delta; deathEffects[i].mesh.scale.addScalar(delta * 10); deathEffects[i].mesh.material.opacity -= delta * 2; if (deathEffects[i].mesh.material.opacity <= 0) { scene.remove(deathEffects[i].mesh); deathEffects.splice(i, 1); } }
-            for (let i = orbs.length - 1; i >= 0; i--) {
-                let o = orbs[i]; o.age += delta; o.vy -= 25 * delta; o.mesh.position.x += o.vx * delta; o.mesh.position.y += o.vy * delta; o.mesh.position.z += o.vz * delta;
-                if (o.mesh.position.y <= 0.8) { o.mesh.position.y = 0.8; o.vy *= -0.5; o.vx *= 0.8; o.vz *= 0.8; }
-                if (o.age > 4) { scene.remove(o.mesh); orbs.splice(i, 1); }
-            }
+            for (let i = orbs.length - 1; i >= 0; i--) { let o = orbs[i]; o.age += delta; o.vy -= 25 * delta; o.mesh.position.x += o.vx * delta; o.mesh.position.y += o.vy * delta; o.mesh.position.z += o.vz * delta; if (o.mesh.position.y <= 0.8) { o.mesh.position.y = 0.8; o.vy *= -0.5; o.vx *= 0.8; o.vz *= 0.8; } if (o.age > 4) { scene.remove(o.mesh); orbs.splice(i, 1); } }
             prevTime = time; renderer.render(scene, camera);
         }
 
